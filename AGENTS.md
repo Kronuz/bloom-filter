@@ -10,15 +10,17 @@ easy to fall into.
 ```
 bloom_filter.hh              BloomFilter<N>: a std::bitset<N*32> with add()/contains(), double-hashed via xxh64 + fnv1ah64. Header. Verbatim from Xapiand.
 test/test.cc                 Runnable smoke test: no false negatives, loose false-positive bound, two sizes, the salt parameter.
-CMakeLists.txt               INTERFACE library `bloom_filter` (+ alias bloom_filter::bloom_filter); FetchContent hashes; CTest test `bloom_filter`.
+examples/usage.cc            Runnable usage example, self-checking under CTest, covering empty filters, N inserts, no false negatives, and false-positive rate.
+CMakeLists.txt               INTERFACE library `bloom_filter` (+ alias bloom_filter::bloom_filter); FetchContent hashes; CTest tests `bloom_filter` and `bloom_filter_usage`.
 LICENSE                      MIT, Copyright (c) 2018,2019 Dubalu LLC.
 README.md                    What it is, install, usage, API.
 ARCHITECTURE.md              Internal design: the m/k sizing, double hashing, the salt, where the guarantees come from.
 ```
 
-Everything is header-only. There is no `.cc` to compile except the test. The
-CMake target is a pure `INTERFACE` library that adds the source dir to the include
-path, requests `cxx_std_20`, and links `hashes` so `"hashes.hh"` resolves.
+Everything is header-only. The `.cc` files are runnable checks, not library
+sources. The CMake target is a pure `INTERFACE` library that adds the source dir to
+the include path, requests `cxx_std_20`, and links `hashes` so `"hashes.hh"`
+resolves.
 
 ## Build and run the test
 
@@ -28,10 +30,10 @@ cmake -B build && cmake --build build && ctest --test-dir build
 
 The first configure fetches `hashes` (and its transitive deps, static-string and
 char-classify) over the network (FetchContent, `GIT_TAG main`). Expected output
-ends with `all bloom-filter tests passed`, exit 0. The test target is
-`bloom_filter_test`; the registered CTest name is `bloom_filter`. The test is only
-added when this repo is the top-level project (CMakeLists.txt), so consumers
-vendoring it via `FetchContent` won't build it.
+ends with both CTest entries passing. The test targets are `bloom_filter_test` and
+`bloom_filter_usage`; the registered CTest names are `bloom_filter` and
+`bloom_filter_usage`. They are only added when this repo is the top-level project
+(CMakeLists.txt), so consumers vendoring it via `FetchContent` won't build them.
 
 ## Dependency
 
@@ -80,10 +82,9 @@ family. This is the library's only direct dependency; there was no `log.h` / opt
   in the header's comment from `P = 1e-6`. To retarget, redo both formulas
   (`k = -ln(P)/ln(2)`, `m = N*k/ln(2)`) and update the constants and the comment
   together. Don't touch just one.
-- **Always extend the smoke test.** `test/test.cc` is the only executable check.
-  Keep the no-false-negative assertions unconditional (they must hold exactly),
-  and keep the false-positive bound *loose* (e.g. `< 0.01` over many probes) so it
-  checks the contract without flaking on the exact rate.
+- **Always extend the executable checks.** Keep the no-false-negative assertions
+  unconditional (they must hold exactly), and keep any false-positive bound loose
+  enough that it checks the contract without flaking on the exact rate.
 
 ## Traps
 

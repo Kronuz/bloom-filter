@@ -118,12 +118,13 @@ public:
 cmake -B build && cmake --build build && ctest --test-dir build
 ```
 
-The first configure fetches `hashes` (and its deps) over the network. The test
-asserts the hard contract (every added key reads back present, no false
-negatives), holds the false-positive rate under a loose bound over 100k absent
-probes at the design load, exercises two filter sizes including the default, and
-checks that the salt parameter actually changes the queried bit positions. It
-prints `all bloom-filter tests passed` and exits 0.
+The first configure fetches `hashes` (and its deps) over the network. CTest runs
+the smoke test and a runnable usage example. Together they assert the hard
+contract (every added key reads back present, no false negatives), hold the
+false-positive rate under loose deterministic bounds at the design load, exercise
+two filter sizes including the default, check that the salt parameter actually
+changes the queried bit positions, and verify that an empty filter reports sampled
+keys as absent.
 
 ## Provenance
 

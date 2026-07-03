@@ -38,4 +38,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   add_executable(bloom_filter_test test/test.cc)
   target_link_libraries(bloom_filter_test PRIVATE bloom_filter)
   add_test(NAME bloom_filter COMMAND bloom_filter_test)
+
+  # A runnable usage example that self-checks the core Bloom filter contract. It
+  # is also registered with ctest so example drift catches regressions.
+  add_executable(bloom_filter_usage examples/usage.cc)
+  target_link_libraries(bloom_filter_usage PRIVATE bloom_filter)
+  add_test(NAME bloom_filter_usage COMMAND bloom_filter_usage)
 endif()
