@@ -1,5 +1,7 @@
 # bloom-filter
 
+[![CI](https://github.com/Kronuz/bloom-filter/actions/workflows/ci.yml/badge.svg)](https://github.com/Kronuz/bloom-filter/actions/workflows/ci.yml)
+
 A small, header-only **Bloom filter** for C++20, extracted from
 [Xapiand](https://github.com/Kronuz/Xapiand).
 
