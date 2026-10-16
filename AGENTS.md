@@ -13,7 +13,9 @@ test/test.cc                 Runnable smoke test: no false negatives, loose fals
 examples/usage.cc            Runnable usage example, self-checking under CTest, covering empty filters, N inserts, no false negatives, and false-positive rate.
 CMakeLists.txt               INTERFACE library `bloom_filter` (+ alias bloom_filter::bloom_filter); FetchContent hashes; CTest tests `bloom_filter` and `bloom_filter_usage`.
 LICENSE                      MIT, Copyright (c) 2018,2019 Dubalu LLC.
-README.md                    What it is, install, usage, API.
+README.md                    What it is, install, quick start.
+docs/API.md                  The API reference and usage.
+docs/bloom-filter.d2         The README diagram's source (docs/bloom-filter.svg is rendered from it).
 ARCHITECTURE.md              Internal design: the m/k sizing, double hashing, the salt, where the guarantees come from.
 ```
 

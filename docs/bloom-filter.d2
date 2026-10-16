@@ -1,0 +1,22 @@
+# bloom-filter: k bit positions per key; all set means "probably", any clear means "no".
+# Render: d2 --layout elk --sketch --theme 302 docs/bloom-filter.d2 docs/bloom-filter.svg
+direction: right
+
+key: '"user-42"' {
+  label: "\"user-42\""
+}
+hash: hashes {
+  label: "xxh64 + fnv1ah64\n→ 20 positions"
+}
+bits: bit array {
+  label: "N × 32 bits\nfixed size"
+}
+no: absent {
+  label: "any bit clear:\ndefinitely absent"
+}
+maybe: present {
+  label: "all bits set:\nprobably present (~1e-6 false positives)"
+}
+key -> hash -> bits
+bits -> no
+bits -> maybe

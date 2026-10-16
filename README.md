@@ -1,142 +1,89 @@
 # bloom-filter
 
 [![CI](https://github.com/Kronuz/bloom-filter/actions/workflows/ci.yml/badge.svg)](https://github.com/Kronuz/bloom-filter/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)
+![Header-only](https://img.shields.io/badge/header--only-yes-green.svg)
 
-A small, header-only **Bloom filter** for C++20, extracted from
-[Xapiand](https://github.com/Kronuz/Xapiand).
+A fixed-size Bloom filter for C++20: answer "have I seen this key?" with no false
+negatives and about one false positive in a million, in memory that does not
+grow with the data. For skipping expensive lookups when the answer is no.
 
-## What it is
+![bloom-filter: a key hashes to bit positions; any clear bit means absent, all set means probably present](docs/bloom-filter.svg)
 
-One header, `bloom_filter.hh`: a `BloomFilter<N>` class template, a probabilistic
-set that answers "have I seen this key?" in fixed space, with one tradeoff. It
-never gives a false negative (if it says a key is absent, the key was definitely
-never added), and it gives a false positive only rarely (if it says present, the
-key is *probably* there, but might not be). That is the Bloom filter bargain: you
-trade a small, tunable false-positive rate for a fixed memory footprint that does
-not grow with the data, and you can never remove a key.
+## ✨ Highlights
 
-It is what you reach for when you want a cheap membership pre-check in front of an
-expensive lookup. A "no" from the filter lets you skip the expensive path
-outright; a "yes" means you still go do the real lookup, but those are the only
-times you pay for it. Xapiand uses it exactly that way.
+- **No false negatives.** A key that was added always reads back present.
+- **About 1e-6 false positives** at the design load: `N × 32` bits and 20 probes.
+- **Fixed footprint.** `BloomFilter<N>` is a `4 × N`-byte object; the default
+  `N = 131072` is 512 KiB.
+- **Salted views.** A non-zero salt gives an independent filter over the same
+  bits.
+- **One header**, hashing with [hashes](https://github.com/Kronuz/hashes)'
+  `xxh64` and `fnv1ah64`.
 
-The template parameter `N` is the expected number of elements. The filter sizes
-its bit array to `m = N * 32` bits and probes it with `k = 20` hash positions,
-which targets a false-positive rate around `1e-6` when about `N` keys have been
-added. Push well past `N` and the rate climbs; stay at or under it and it holds.
-The default is `N = 131072` (a 512 KiB filter).
+## 📦 Installation
 
-## Install
-
-CMake with `FetchContent`:
+Requires a C++20 compiler and CMake 3.14 or newer; it fetches hashes. CI builds it
+on Linux (x86_64, arm64), macOS (arm64, x86_64), and FreeBSD, plus ASan, UBSan,
+and TSan builds.
 
 ```cmake
 include(FetchContent)
-FetchContent_Declare(
-  bloom_filter
+FetchContent_Declare(bloom_filter
   GIT_REPOSITORY https://github.com/Kronuz/bloom-filter.git
-  GIT_TAG        main
-)
+  GIT_TAG        main)
 FetchContent_MakeAvailable(bloom_filter)
 
-target_link_libraries(your_target PRIVATE bloom_filter::bloom_filter)
+target_link_libraries(my_app PRIVATE bloom_filter::bloom_filter)
 ```
 
-The `bloom_filter` target is a pure `INTERFACE` library: it compiles nothing,
-requests `cxx_std_20`, and puts the header directory on your include path. It has
-one dependency, the sibling [hashes](https://github.com/Kronuz/hashes) library,
-which provides the `xxh64` and `fnv1ah64` hash families the filter derives its
-probe positions from. CMake pulls it in for you (and `hashes` in turn pulls its
-own deps), so `"hashes.hh"` resolves with no extra wiring on your side. Then:
-
-```cpp
-#include "bloom_filter.hh"
-```
-
-The header keeps its original filename, so a codebase that already
-`#include "bloom_filter.hh"` just needs this repo on its include path.
-
-## Usage
+## 🚀 Quick start
 
 ```cpp
 #include "bloom_filter.hh"
 
-// Size the filter for the load you expect. Default is N = 131072.
-BloomFilter<8192> seen;
+#include <memory>
+#include <string>
 
-// add() and contains() take a byte buffer: pointer + length.
-std::string key = "user-42";
-seen.add(key.data(), key.size());
+int main() {
+	auto seen = std::make_unique<BloomFilter<8192>>();   // 32 KiB; large ones belong on the heap
 
-// A key that was added is *always* reported present: no false negatives.
-seen.contains(key.data(), key.size());            // true
-
-// A key that was never added is *usually* reported absent, but a rare
-// collision can return true. Treat a true as "probably present, go check".
-seen.contains("never-added", 11);                 // almost always false
-
-// String literals work directly (mind the trailing NUL: pass the length you
-// want; sizeof - 1 drops it).
-seen.add("hello", 5);
-
-// The optional salt perturbs the hashing, giving you an independent filter view
-// over the same bits. It must be non-zero.
-seen.add(key.data(), key.size(), 0x9E3779B1);
-seen.contains(key.data(), key.size(), 0x9E3779B1); // true under the same salt
+	std::string key = "user-42";
+	seen->add(key.data(), key.size());
+	bool hit = seen->contains(key.data(), key.size());   // true, always
+	bool miss = seen->contains("other", 5);              // false, almost always
+}
 ```
 
-There is no `remove`: a Bloom filter cannot delete a key without risking false
-negatives for others that share its bits. When the filter fills up, build a fresh
-one.
+[`examples/usage.cc`](examples/usage.cc) is a runnable usage example.
 
-## API reference
+## 🎯 When to use it
 
-```cpp
-template <size_t N = 131072>
-class BloomFilter {
-public:
-    void add(const char* data, size_t len, uint64_t salt = 1);
-    bool contains(const char* data, size_t len, uint64_t salt = 1) const;
-};
-```
+- ✅ A cheap "definitely not there" in front of a disk read, a network call, or a
+  big table.
+- ❌ Removing keys: a Bloom filter cannot delete without causing false negatives.
+- ❌ A static key set built once: [fusefilter](https://github.com/Kronuz/fusefilter)
+  answers the same question in fewer bits per key.
 
-- **`N`** (template, default `131072`) — the expected element count. It sets the
-  bit-array size to `m = N * 32` bits; the probe count is fixed at `k = 20`. The
-  whole bit array is an inline `std::bitset<m>` member, so a `BloomFilter<N>` is a
-  `4 * N`-byte object. The default is 512 KiB; heap-allocate large ones rather
-  than putting them on the stack.
-- **`add(data, len, salt)`** — hashes the `len`-byte buffer at `data` and sets its
-  `k` bit positions. Adding the same key twice is a no-op on the bits.
-- **`contains(data, len, salt)`** — returns `true` if all `k` bit positions for
-  the key are set. `false` is definitive (the key was never added); `true` is
-  probabilistic (present, or a rare collision).
-- **`salt`** (default `1`) — perturbs the second hash so the same key maps to a
-  different set of positions. **Must be non-zero** (`hash()` asserts it). Use the
-  same salt for `add` and `contains`; different salts give independent views.
+## 📚 Documentation
 
-## Build & test
+- [docs/API.md](docs/API.md): `add`, `contains`, sizing, and salts.
+- [ARCHITECTURE.md](ARCHITECTURE.md): how the probe positions are derived.
+- [AGENTS.md](AGENTS.md): repository map and invariants.
+
+## 🛠️ Building and testing
 
 ```sh
 cmake -B build && cmake --build build && ctest --test-dir build
 ```
 
-The first configure fetches `hashes` (and its deps) over the network. CTest runs
-the smoke test and a runnable usage example. Together they assert the hard
-contract (every added key reads back present, no false negatives), hold the
-false-positive rate under loose deterministic bounds at the design load, exercise
-two filter sizes including the default, check that the salt parameter actually
-changes the queried bit positions, and verify that an empty filter reports sampled
-keys as absent.
+## 🤝 Contributing
 
-## Provenance
+Issues and pull requests are welcome. Read [AGENTS.md](AGENTS.md) first. CI must
+pass on every platform.
 
-Extracted from [Xapiand](https://github.com/Kronuz/Xapiand). `bloom_filter.hh`
-was copied verbatim; the only change on extraction was wiring its one local
-include, `"hashes.hh"`, to the standalone
-[hashes](https://github.com/Kronuz/hashes) library through CMake. No source
-edits, no decoupling delta. See [ARCHITECTURE.md](ARCHITECTURE.md) for the design
-and [AGENTS.md](AGENTS.md) for the repo map and invariants.
+## 📄 License
 
-## License
-
-MIT, Copyright (c) 2018,2019 Dubalu LLC. See [LICENSE](LICENSE).
+MIT, Copyright (c) 2018, 2019 Dubalu LLC. See [LICENSE](LICENSE). Extracted from
+[Xapiand](https://github.com/Kronuz/Xapiand).
