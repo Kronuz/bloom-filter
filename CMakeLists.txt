@@ -14,7 +14,7 @@ include(FetchContent)
 FetchContent_Declare(
   hashes
   GIT_REPOSITORY https://github.com/Kronuz/hashes.git
-  GIT_TAG        32c49913e5287884518152d28c712f83dafef413
+  GIT_TAG        7ab0c23325debfbaf4104044987ba6583d14808f
 )
 FetchContent_MakeAvailable(hashes)
 
