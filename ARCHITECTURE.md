@@ -11,10 +11,12 @@ One header, header-only, one external dependency:
 
 ```
   bloom_filter.hh   BloomFilter<N>: a std::bitset<N*32> plus add()/contains()
+                    FastBloomFilter<N>, BlockedBloomFilter<N>: same API, one-hash layouts
 ```
 
-The class template `BloomFilter<N>` holds a single `std::bitset<m>` member and
-nothing else. `add` and `contains` are the whole surface. The hashing comes from
+Most of this document describes `BloomFilter<N>`; the last section covers the
+other two types. The class template `BloomFilter<N>` holds a single
+`std::bitset<m>` member and nothing else. `add` and `contains` are the whole surface. The hashing comes from
 the sibling [hashes](https://github.com/Kronuz/hashes) library (`xxh64::hash` and
 `fnv1ah64::hash`), which is the only reason this is not dependency-free.
 
@@ -91,3 +93,28 @@ bits with `k = 20`) it sits around `1e-6`. Insert far more than `N` keys and the
 array fills, more positions are set, and the false-positive rate rises. The filter
 does not detect or prevent this; staying within the load you sized for is the
 caller's job.
+
+## One-hash layouts: `FastBloomFilter` and `BlockedBloomFilter`
+
+Both types keep `k = 20` and `m = N * 32`, stored as an aligned array of 64-bit
+words. They hash the key once with xxh64 to get `h`. A splitmix-style finalizer
+(`bloom_detail::mix64`) mixes `h` with the salt into an odd step `d`, so the
+cost of the other 19 probes does not depend on key length. `BloomFilter<N>`'s
+second hash, byte-at-a-time FNV-1a, is a dependent multiply chain of about
+0.7 ns per key byte.
+
+- **`FastBloomFilter<N>`** probes a flat bitset at `h + n * d` (double hashing)
+  and maps each value to `[0, m)` with a multiply-high reduction
+  (`bloom_detail::reduce`), so there is no division. `contains` has no early
+  exit: the 20 loads are independent and overlap, and one final branch replaces
+  a possible mispredict per probe. Its false-positive rate matches
+  `BloomFilter<N>`, about `1e-6` at `N` keys.
+- **`BlockedBloomFilter<N>`** uses `h` to pick one 512-bit block (one 64-byte
+  cache line) and sets all 20 bits inside it, taking each position from the top
+  9 bits of `n * d`. A lookup costs one cache miss instead of up to 20. The price
+  is a higher false-positive rate at the same size, the usual blocked-filter
+  trade. It suits filters larger than the cache.
+
+The three types set different bits for the same key, so a bitset persisted from
+one type must not be loaded into another. The salt rules match `BloomFilter<N>`:
+non-zero (asserted), and the same for `add` and `contains`.

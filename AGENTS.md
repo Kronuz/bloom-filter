@@ -8,15 +8,17 @@ easy to fall into.
 ## Repo map
 
 ```
-bloom_filter.hh              BloomFilter<N>: a std::bitset<N*32> with add()/contains(), double-hashed via xxh64 + fnv1ah64. Header. Verbatim from Xapiand.
-test/test.cc                 Runnable smoke test: no false negatives, loose false-positive bound, two sizes, the salt parameter.
+bloom_filter.hh              BloomFilter<N> (xxh64 + fnv1ah64 double hashing, Xapiand's layout) plus FastBloomFilter<N> and BlockedBloomFilter<N> (one xxh64 pass). Header.
+test/test.cc                 Runnable checks: no false negatives, loose false-positive bound, two sizes, the salt parameter, a frozen-copy differential test of BloomFilter, and the one-hash types.
+bench/bloom_bench.cc         Benchmark of the three types against boost::bloom (target bloom_bench, not built by default).
 examples/usage.cc            Runnable usage example, self-checking under CTest, covering empty filters, N inserts, no false negatives, and false-positive rate.
 CMakeLists.txt               INTERFACE library `bloom_filter` (+ alias bloom_filter::bloom_filter); FetchContent hashes; CTest tests `bloom_filter` and `bloom_filter_usage`.
 LICENSE                      MIT, Copyright (c) 2018,2019 Dubalu LLC.
-README.md                    What it is, install, quick start.
+README.md                    What it is, install, quick start, layouts and benchmark numbers.
+CHANGELOG.md                 Dated changes.
 docs/API.md                  The API reference and usage.
 docs/bloom-filter.d2         The README diagram's source (docs/bloom-filter.svg is rendered from it).
-ARCHITECTURE.md              Internal design: the m/k sizing, double hashing, the salt, where the guarantees come from.
+ARCHITECTURE.md              Internal design: the m/k sizing, double hashing, the salt, where the guarantees come from, the one-hash layouts.
 ```
 
 Everything is header-only. The `.cc` files are runnable checks, not library
@@ -44,8 +46,8 @@ ends with both CTest entries passing. The test targets are `bloom_filter_test` a
 That header lives in the sibling [hashes](https://github.com/Kronuz/hashes)
 library, pulled in by CMake and linked through the `hashes::hashes` target so the
 include path resolves. We track its tip with `GIT_TAG main`, like the rest of the
-family. This is the library's only direct dependency; there was no `log.h` / opts
-/ config coupling in the original.
+family. This is the library's only direct dependency; nothing depends on
+Xapiand's `log.h`, opts or config.
 
 ## Conventions
 
@@ -105,9 +107,8 @@ family. This is the library's only direct dependency; there was no `log.h` / opt
 
 ## Standalone vs. Xapiand
 
-This is a standalone extraction from
-[Xapiand](https://github.com/Kronuz/Xapiand). `bloom_filter.hh` was copied
-verbatim; the only change on extraction was resolving the one local include,
-`"hashes.hh"`, against the standalone hashes library through CMake instead of
-Xapiand's source tree. There is no source decoupling delta. Keep it that way; any
-change here should be reconcilable with upstream as a plain edit.
+`BloomFilter<N>` comes from [Xapiand](https://github.com/Kronuz/Xapiand) with
+its bits and hashing intact; `"hashes.hh"` resolves against the standalone
+hashes library through CMake. The differential test checks every answer
+against a frozen copy of that implementation. `FastBloomFilter<N>` and
+`BlockedBloomFilter<N>` exist only here.

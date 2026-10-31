@@ -21,6 +21,8 @@ grow with the data. For skipping expensive lookups when the answer is no.
   `N = 131072` is 512 KiB.
 - **Salted views.** A non-zero salt gives an independent filter over the same
   bits.
+- **Three layouts, one API.** `FastBloomFilter<N>` and `BlockedBloomFilter<N>`
+  hash each key once, so lookup cost does not grow with key length.
 - **One header**, hashing with [hashes](https://github.com/Kronuz/hashes)'
   `xxh64` and `fnv1ah64`.
 
@@ -68,27 +70,42 @@ int main() {
 - ❌ A static key set built once: [fusefilter](https://github.com/Kronuz/fusefilter)
   answers the same question in fewer bits per key.
 
-## ⚡ Faster layouts (opt-in)
+## ⚡ Layouts and performance
 
-`BloomFilter<N>` keeps its original bit layout: it runs an xxh64 pass and a
-byte-at-a-time FNV-1a pass, so a lookup costs ~0.9 ns per key byte on top of 20
-probes. `FastBloomFilter<N>` and `BlockedBloomFilter<N>` have the same API and
-size but derive every probe from one xxh64 pass, so key length no longer
-multiplies the cost. They set different bits than `BloomFilter<N>`: never load
-a bitset persisted from one type into another.
+The three types share the API, the size (`N × 32` bits), and `k = 20` probes.
+They differ in how a key becomes bit positions:
 
-Apple arm64, ns per op (best of 7; 16-byte keys, N=131072, miss): legacy 26.7,
-Fast 17.4, Blocked 14.7, boost::bloom (pre-hashed key plus our xxh64) 17.0. With
-64-byte keys: legacy 67.3, Fast 21.8, Blocked 19.1, boost 22.6. `Fast` has the
-same false-positive rate as the legacy type (0 of 131072 absent keys); `Blocked`
-confines each key to one cache line and pays ~1.3e-3 (172 of 131072). Run
-`bloom_bench` to reproduce.
+- `BloomFilter<N>` runs an xxh64 pass and a byte-at-a-time FNV-1a pass, about
+  0.9 ns per key byte on top of the 20 probes.
+- `FastBloomFilter<N>` derives every probe from one xxh64 pass over a flat
+  bitset. Its false-positive rate matches `BloomFilter<N>`.
+- `BlockedBloomFilter<N>` puts all 20 bits of a key in one 64-byte cache line.
+  A lookup costs one cache miss, and the false-positive rate is higher.
+
+Each type sets different bits for the same key. Never load a bitset persisted
+from one type into another.
+
+Apple arm64, ns per miss lookup, best of 7, `N = 131072`; `boost::bloom` gets the
+key pre-hashed with the same xxh64:
+
+| key | `BloomFilter` | `FastBloomFilter` | `BlockedBloomFilter` | `boost::bloom` |
+|---|---|---|---|---|
+| 16 bytes | 26.7 | 17.4 | 14.7 | 17.0 |
+| 64 bytes | 67.3 | 21.8 | 19.1 | 22.6 |
+
+False positives over 131072 absent keys: 0 for `BloomFilter` and
+`FastBloomFilter`, 172 (about 1.3e-3) for `BlockedBloomFilter`.
+
+```sh
+cmake -B build && cmake --build build --target bloom_bench && ./build/bloom_bench
+```
 
 ## 📚 Documentation
 
 - [docs/API.md](docs/API.md): `add`, `contains`, sizing, and salts.
 - [ARCHITECTURE.md](ARCHITECTURE.md): how the probe positions are derived.
 - [AGENTS.md](AGENTS.md): repository map and invariants.
+- [CHANGELOG.md](CHANGELOG.md): what changed.
 
 ## 🛠️ Building and testing
 

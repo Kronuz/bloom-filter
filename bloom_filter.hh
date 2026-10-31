@@ -86,27 +86,8 @@ public:
 };
 
 
-// FastBloomFilter<N> and BlockedBloomFilter<N>: opt-in alternatives to BloomFilter<N>
-// with the same API, the same size (N * 32 bits) and k = 20 probes, but a different
-// bit layout. They are NOT bit-compatible with BloomFilter<N>: the same key sets
-// different bits, so a bitset persisted from one type must not be loaded into
-// another. BloomFilter<N> itself is unchanged.
-//
-// Hashing: one xxh64 pass over the key gives h. Everything else is derived from h
-// and the salt with a few multiplies (a splitmix-style finalizer), so the cost no
-// longer grows with key length: the legacy filter runs a second, byte-at-a-time
-// FNV-1a pass, a dependent multiply chain of ~0.7 ns per key byte.
-//
-//  * FastBloomFilter<N>: flat bitset, k probes at h + n * d (double hashing, d odd
-//    and decorrelated from h by the finalizer), mapped to [0, m) with a
-//    multiply-high range reduction. False-positive rate matches BloomFilter<N>
-//    (~1e-6 at N keys). contains() has no early exit: the k loads are independent
-//    and overlap, and one final branch replaces a mispredict per probe.
-//  * BlockedBloomFilter<N>: h picks one 64-byte block (one cache line), and all k
-//    bits are set inside it, so a probe costs one cache miss instead of up to k.
-//    The price is a higher false-positive rate at the same size (the classic
-//    blocked-filter trade-off; see the benchmark), so choose it for speed on
-//    filters larger than the cache.
+// FastBloomFilter<N> and BlockedBloomFilter<N>: BloomFilter<N>'s API and size, with all
+// probes derived from one xxh64 pass. Not bit-compatible with BloomFilter<N>; see ARCHITECTURE.md.
 namespace bloom_detail {
 	inline constexpr uint64_t mix64(uint64_t x) noexcept {
 		x ^= x >> 32;

@@ -23,6 +23,13 @@ public:
   different set of positions. **Must be non-zero** (`hash()` asserts it). Use the
   same salt for `add` and `contains`; different salts give independent views.
 
+`FastBloomFilter<N>` and `BlockedBloomFilter<N>` have the same template
+parameter, members, size and salt rules. They hash each key once, so their cost
+does not grow with key length. `BlockedBloomFilter<N>` keeps each key in one
+64-byte block and has a higher false-positive rate (about 1.3e-3 at `N` keys);
+it requires `N * 32` to be a multiple of 512. The three types set different
+bits for the same key, so their bitsets are not interchangeable.
+
 ## Usage
 
 ```cpp
