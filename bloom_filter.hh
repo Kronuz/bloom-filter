@@ -23,7 +23,9 @@
 
 #pragma once
 
+#include <array>          // for std::array
 #include <cassert>        // for assert
+#include <cstdint>        // for uint64_t
 #include <bitset>         // for std::bitset
 #include <utility>        // for std::make_pair
 
@@ -80,5 +82,117 @@ public:
 			}
 		}
 		return true;
+	}
+};
+
+
+// FastBloomFilter<N> and BlockedBloomFilter<N>: opt-in alternatives to BloomFilter<N>
+// with the same API, the same size (N * 32 bits) and k = 20 probes, but a different
+// bit layout. They are NOT bit-compatible with BloomFilter<N>: the same key sets
+// different bits, so a bitset persisted from one type must not be loaded into
+// another. BloomFilter<N> itself is unchanged.
+//
+// Hashing: one xxh64 pass over the key gives h. Everything else is derived from h
+// and the salt with a few multiplies (a splitmix-style finalizer), so the cost no
+// longer grows with key length: the legacy filter runs a second, byte-at-a-time
+// FNV-1a pass, a dependent multiply chain of ~0.7 ns per key byte.
+//
+//  * FastBloomFilter<N>: flat bitset, k probes at h + n * d (double hashing, d odd
+//    and decorrelated from h by the finalizer), mapped to [0, m) with a
+//    multiply-high range reduction. False-positive rate matches BloomFilter<N>
+//    (~1e-6 at N keys). contains() has no early exit: the k loads are independent
+//    and overlap, and one final branch replaces a mispredict per probe.
+//  * BlockedBloomFilter<N>: h picks one 64-byte block (one cache line), and all k
+//    bits are set inside it, so a probe costs one cache miss instead of up to k.
+//    The price is a higher false-positive rate at the same size (the classic
+//    blocked-filter trade-off; see the benchmark), so choose it for speed on
+//    filters larger than the cache.
+namespace bloom_detail {
+	inline constexpr uint64_t mix64(uint64_t x) noexcept {
+		x ^= x >> 32;
+		x *= 0xd6e8feb86659fd93ULL;
+		x ^= x >> 32;
+		x *= 0xd6e8feb86659fd93ULL;
+		x ^= x >> 32;
+		return x;
+	}
+	// floor(x * range / 2^64): a range reduction with no division.
+	inline uint64_t reduce(uint64_t x, uint64_t range) noexcept {
+		return static_cast<uint64_t>((static_cast<unsigned __int128>(x) * range) >> 64);
+	}
+}
+
+template <size_t N=131072>
+class FastBloomFilter {
+	static constexpr size_t k = 20;
+	static constexpr size_t m = N * 32;
+	static_assert(m % 64 == 0, "N * 32 must be a multiple of 64");
+	alignas(64) std::array<uint64_t, m / 64> words{};
+
+public:
+	void add(const char* data, size_t len, uint64_t salt = 1) {
+		assert(salt);
+		uint64_t h = xxh64::hash(data, len);
+		uint64_t d = bloom_detail::mix64(h ^ (salt * 0x9E3779B97F4A7C15ULL)) | 1;
+		for (size_t n = k; n; --n) {
+			h += d;
+			auto bit = bloom_detail::reduce(h, m);
+			words[bit >> 6] |= uint64_t(1) << (bit & 63);
+		}
+	}
+
+	bool contains(const char* data, size_t len, uint64_t salt = 1) const {
+		assert(salt);
+		uint64_t h = xxh64::hash(data, len);
+		uint64_t d = bloom_detail::mix64(h ^ (salt * 0x9E3779B97F4A7C15ULL)) | 1;
+		uint64_t miss = 0;
+		for (size_t n = k; n; --n) {
+			h += d;
+			auto bit = bloom_detail::reduce(h, m);
+			miss |= ~words[bit >> 6] & (uint64_t(1) << (bit & 63));
+		}
+		return miss == 0;
+	}
+};
+
+template <size_t N=131072>
+class BlockedBloomFilter {
+	static constexpr size_t k = 20;
+	static constexpr size_t m = N * 32;
+	static constexpr size_t block_words = 8;  // 512 bits
+	static constexpr size_t nblocks = m / 512;
+	static_assert(m % 512 == 0 && m >= 512, "N * 32 must be a multiple of 512");
+	alignas(64) std::array<uint64_t, m / 64> words{};
+
+	// The k bit positions inside a block come from the top 9 bits of x = n * d.
+	const uint64_t* block_of(uint64_t h) const { return &words[bloom_detail::reduce(h, nblocks) * block_words]; }
+
+public:
+	void add(const char* data, size_t len, uint64_t salt = 1) {
+		assert(salt);
+		uint64_t h = xxh64::hash(data, len);
+		uint64_t* block = const_cast<uint64_t*>(block_of(h));
+		uint64_t d = bloom_detail::mix64(h ^ (salt * 0x9E3779B97F4A7C15ULL)) | 1;
+		uint64_t x = 0;
+		for (size_t n = k; n; --n) {
+			x += d;
+			auto bit = x >> 55;  // 0..511
+			block[bit >> 6] |= uint64_t(1) << (bit & 63);
+		}
+	}
+
+	bool contains(const char* data, size_t len, uint64_t salt = 1) const {
+		assert(salt);
+		uint64_t h = xxh64::hash(data, len);
+		const uint64_t* block = block_of(h);
+		uint64_t d = bloom_detail::mix64(h ^ (salt * 0x9E3779B97F4A7C15ULL)) | 1;
+		uint64_t x = 0;
+		uint64_t miss = 0;
+		for (size_t n = k; n; --n) {
+			x += d;
+			auto bit = x >> 55;
+			miss |= ~block[bit >> 6] & (uint64_t(1) << (bit & 63));
+		}
+		return miss == 0;
 	}
 };

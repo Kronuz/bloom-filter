@@ -183,11 +183,96 @@ static void test_salt_parameter() {
 }
 
 
+// ---------------------------------------------------------------------------
+// Frozen copy of the original BloomFilter. The default type must keep setting
+// exactly the same bits (persisted bitsets stay valid), so it is checked against
+// this copy: identical answers for every key, present or not.
+// ---------------------------------------------------------------------------
+template <size_t N>
+class FrozenBloom {
+	static constexpr size_t k = 20;
+	static constexpr size_t m = N * 32;
+	std::bitset<m> bits;
+	auto hash(const char* data, size_t len, uint64_t salt) const {
+		return std::make_pair(xxh64::hash(data, len), fnv1ah64::hash(data, len) * salt);
+	}
+public:
+	void add(const char* data, size_t len, uint64_t salt = 1) {
+		auto h = hash(data, len, salt);
+		for (auto n = k; n; --n) bits[(h.first + n * h.second) % m] = true;
+	}
+	bool contains(const char* data, size_t len, uint64_t salt = 1) const {
+		auto h = hash(data, len, salt);
+		for (auto n = k; n; --n) if (!bits[(h.first + n * h.second) % m]) return false;
+		return true;
+	}
+};
+
+static std::string random_key(uint64_t& r) {
+	r = r * 6364136223846793005ULL + 1442695040888963407ULL;
+	size_t len = (r >> 60) * 5;  // 0..75, includes empty keys
+	std::string s;
+	for (size_t i = 0; i < len; ++i) {
+		r = r * 6364136223846793005ULL + 1442695040888963407ULL;
+		s.push_back(char(r >> 56));  // any byte, including NUL and high bytes
+	}
+	return s;
+}
+
+static void test_default_layout_frozen() {
+	constexpr size_t N = 8192;
+	auto a = std::make_unique<BloomFilter<N>>();
+	auto b = std::make_unique<FrozenBloom<N>>();
+	uint64_t r = 1;
+	for (int i = 0; i < 6000; ++i) {
+		auto k = random_key(r);
+		uint64_t salt = 1 + (i % 3);
+		a->add(k.data(), k.size(), salt);
+		b->add(k.data(), k.size(), salt);
+	}
+	// Probe with fresh keys (mostly absent, a few false positives) and salts:
+	// every answer, false positives included, must match the frozen copy.
+	uint64_t r2 = 99;
+	for (int i = 0; i < 200000; ++i) {
+		auto k = random_key(r2);
+		uint64_t salt = 1 + (i % 3);
+		assert(a->contains(k.data(), k.size(), salt) == b->contains(k.data(), k.size(), salt));
+	}
+}
+
+template <typename F>
+static void test_variant(double max_fp) {
+	constexpr size_t N = 8192;
+	auto f = std::make_unique<F>();
+	for (int i = 0; i < int(N); ++i) add(*f, present_key(i));
+	for (int i = 0; i < int(N); ++i) assert(contains(*f, present_key(i)));
+	int fp = 0;
+	const int probes = 200000;
+	for (int i = 0; i < probes; ++i) fp += contains(*f, absent_key(i));
+	assert(fp <= max_fp * probes);
+	// salt separates probe sets: keys added under salt 1 are (almost) never seen under salt 7.
+	int seen = 0;
+	for (int i = 0; i < int(N); ++i) seen += contains(*f, present_key(i), 7);
+	assert(seen <= int(N) / 100 + 5);
+	// Edge keys.
+	f->add("", 0);
+	assert(f->contains("", 0));
+	std::string nul("a\0b", 3);
+	add(*f, nul);
+	assert(contains(*f, nul));
+	// A fresh filter reports nothing present.
+	auto e = std::make_unique<F>();
+	for (int i = 0; i < 1000; ++i) assert(!contains(*e, absent_key(i)));
+}
+
 int main() {
 	test_no_false_negatives();
 	test_false_positive_rate_loose();
 	test_sizing_parameter();
 	test_salt_parameter();
+	test_default_layout_frozen();
+	test_variant<FastBloomFilter<8192>>(1e-5);
+	test_variant<BlockedBloomFilter<8192>>(5e-3);
 	std::printf("all bloom-filter tests passed\n");
 	return 0;
 }

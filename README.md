@@ -68,6 +68,22 @@ int main() {
 - ❌ A static key set built once: [fusefilter](https://github.com/Kronuz/fusefilter)
   answers the same question in fewer bits per key.
 
+## ⚡ Faster layouts (opt-in)
+
+`BloomFilter<N>` keeps its original bit layout: it runs an xxh64 pass and a
+byte-at-a-time FNV-1a pass, so a lookup costs ~0.9 ns per key byte on top of 20
+probes. `FastBloomFilter<N>` and `BlockedBloomFilter<N>` have the same API and
+size but derive every probe from one xxh64 pass, so key length no longer
+multiplies the cost. They set different bits than `BloomFilter<N>`: never load
+a bitset persisted from one type into another.
+
+Apple arm64, ns per op (best of 7; 16-byte keys, N=131072, miss): legacy 26.7,
+Fast 17.4, Blocked 14.7, boost::bloom (pre-hashed key plus our xxh64) 17.0. With
+64-byte keys: legacy 67.3, Fast 21.8, Blocked 19.1, boost 22.6. `Fast` has the
+same false-positive rate as the legacy type (0 of 131072 absent keys); `Blocked`
+confines each key to one cache line and pays ~1.3e-3 (172 of 131072). Run
+`bloom_bench` to reproduce.
+
 ## 📚 Documentation
 
 - [docs/API.md](docs/API.md): `add`, `contains`, sizing, and salts.
