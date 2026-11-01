@@ -120,6 +120,19 @@ namespace bloom_detail {
 		return mulhi_portable(x, range);
 #endif
 	}
+	// contains() tests the k = 20 probes in groups of probe_group: the loads of a group are
+	// independent and OR-accumulated, and one branch per group ends a lookup at the first
+	// group that has a clear bit. A key that is absent from a filter at its design load
+	// (46% of the bits set) leaves its first group with probability 1 - 0.46^4 = 95%, so a
+	// miss reads about 4 words instead of 20; a key that is present reads all 20.
+	inline constexpr size_t probe_group = 4;
+#ifdef BLOOM_FILTER_COUNT_PROBES
+	// Test hook: the number of words contains() has read on this thread.
+	inline thread_local size_t words_read = 0;
+#define BLOOM_FILTER_PROBE() (++::bloom_detail::words_read)
+#else
+#define BLOOM_FILTER_PROBE() ((void)0)
+#endif
 }
 
 template <size_t N=131072>
@@ -127,6 +140,7 @@ class FastBloomFilter {
 	static constexpr size_t k = 20;
 	static constexpr size_t m = N * 32;
 	static_assert(m % 64 == 0, "N * 32 must be a multiple of 64");
+	static_assert(k % bloom_detail::probe_group == 0, "k must be a multiple of the probe group");
 	alignas(64) std::array<uint64_t, m / 64> words{};
 
 public:
@@ -145,13 +159,17 @@ public:
 		assert(salt);
 		uint64_t h = xxh64::hash(data, len);
 		uint64_t d = bloom_detail::mix64(h ^ (salt * 0x9E3779B97F4A7C15ULL)) | 1;
-		uint64_t miss = 0;
-		for (size_t n = k; n; --n) {
-			h += d;
-			auto bit = bloom_detail::reduce(h, m);
-			miss |= ~words[bit >> 6] & (uint64_t(1) << (bit & 63));
+		for (size_t left = k; left; left -= bloom_detail::probe_group) {
+			uint64_t miss = 0;
+			for (size_t n = 0; n < bloom_detail::probe_group; ++n) {
+				h += d;
+				auto bit = bloom_detail::reduce(h, m);
+				BLOOM_FILTER_PROBE();
+				miss |= ~words[bit >> 6] & (uint64_t(1) << (bit & 63));
+			}
+			if (miss) return false;
 		}
-		return miss == 0;
+		return true;
 	}
 };
 
@@ -162,6 +180,7 @@ class BlockedBloomFilter {
 	static constexpr size_t block_words = 8;  // 512 bits
 	static constexpr size_t nblocks = m / 512;
 	static_assert(m % 512 == 0 && m >= 512, "N * 32 must be a multiple of 512");
+	static_assert(k % bloom_detail::probe_group == 0, "k must be a multiple of the probe group");
 	alignas(64) std::array<uint64_t, m / 64> words{};
 
 	// The k bit positions inside a block come from the top 9 bits of x = n * d.
@@ -187,12 +206,16 @@ public:
 		const uint64_t* block = block_of(h);
 		uint64_t d = bloom_detail::mix64(h ^ (salt * 0x9E3779B97F4A7C15ULL)) | 1;
 		uint64_t x = 0;
-		uint64_t miss = 0;
-		for (size_t n = k; n; --n) {
-			x += d;
-			auto bit = x >> 55;
-			miss |= ~block[bit >> 6] & (uint64_t(1) << (bit & 63));
+		for (size_t left = k; left; left -= bloom_detail::probe_group) {
+			uint64_t miss = 0;
+			for (size_t n = 0; n < bloom_detail::probe_group; ++n) {
+				x += d;
+				auto bit = x >> 55;
+				BLOOM_FILTER_PROBE();
+				miss |= ~block[bit >> 6] & (uint64_t(1) << (bit & 63));
+			}
+			if (miss) return false;
 		}
-		return miss == 0;
+		return true;
 	}
 };

@@ -105,13 +105,20 @@ second hash, byte-at-a-time FNV-1a, is a dependent multiply chain of about
 
 - **`FastBloomFilter<N>`** probes a flat bitset at `h + n * d` (double hashing)
   and maps each value to `[0, m)` with a multiply-high reduction
-  (`bloom_detail::reduce`), so there is no division. `contains` has no early
-  exit: the 20 loads are independent and overlap, and one final branch replaces
-  a possible mispredict per probe. Its false-positive rate matches
+  (`bloom_detail::reduce`), so there is no division. `contains` tests the probes
+  in groups of `bloom_detail::probe_group = 4`: the four loads of a group are
+  independent and OR-accumulated, and one branch per group leaves at the first
+  group that has a clear bit. At the design load 46% of the bits are set, so an
+  absent key leaves after its first group 95% of the time and reads 4 words
+  instead of 20, and that branch is rarely mispredicted. A branch per probe would
+  mispredict about half the time on the first probe (46% of the bits are set),
+  and no exit at all makes every miss do the work of 20 probes. A present key
+  does the work of all 20 either way. Its false-positive rate matches
   `BloomFilter<N>`, about `1e-6` at `N` keys.
 - **`BlockedBloomFilter<N>`** uses `h` to pick one 512-bit block (one 64-byte
   cache line) and sets all 20 bits inside it, taking each position from the top
-  9 bits of `n * d`. A lookup costs one cache miss instead of up to 20. The price
+  9 bits of `n * d`. A lookup costs one cache miss instead of up to 20, and tests
+  its probes in the same groups as `FastBloomFilter`. The price
   is a higher false-positive rate at the same size, the usual blocked-filter
   trade. It suits filters larger than the cache.
 

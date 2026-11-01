@@ -9,7 +9,7 @@ easy to fall into.
 
 ```
 bloom_filter.hh              BloomFilter<N> (xxh64 + fnv1ah64 double hashing, Xapiand's layout) plus FastBloomFilter<N> and BlockedBloomFilter<N> (one xxh64 pass). Header.
-test/test.cc                 Runnable checks: no false negatives, loose false-positive bound, two sizes, the salt parameter, a frozen-copy differential test of BloomFilter, the one-hash types, and the portable multiply against a schoolbook oracle. Also built as `bloom_filter_portable` with BLOOM_FILTER_NO_INT128.
+test/test.cc                 Runnable checks: no false negatives, loose false-positive bound, two sizes, the salt parameter, frozen-copy differential tests of all three types, the portable multiply against a schoolbook oracle, and the words a miss reads. Also built as `bloom_filter_portable` with BLOOM_FILTER_NO_INT128.
 test/pedantic.cc             The header under -Wall -Wextra -Wpedantic -Werror (GCC, Clang); built by the CTest test `bloom_filter_pedantic_build`, run by `bloom_filter_pedantic`.
 bench/bloom_bench.cc         Benchmark of the three types against boost::bloom (target bloom_bench, not built by default).
 examples/usage.cc            Runnable usage example, self-checking under CTest, covering empty filters, N inserts, no false negatives, and false-positive rate.
@@ -80,6 +80,15 @@ Xapiand's `log.h`, opts or config.
   `4 * N`-byte object with the size baked into the type. The default `N = 131072`
   is 512 KiB. Heap-allocate large filters; the test does (`std::make_unique`)
   precisely because even a modest `N` overflows the stack.
+
+- **The one-hash types set the same bits however `contains` is written.**
+  `FastBloomFilter` and `BlockedBloomFilter` are checked against frozen copies in
+  `test/test.cc`; a change to `add`, to `mix64` or to the reduction changes persisted bitsets
+  and fails that test. `contains` tests the 20 probes in groups of
+  `bloom_detail::probe_group` (a divisor of `k`, asserted) and leaves at the first group with a
+  clear bit; the answers do not depend on the group size, the cost of a miss does. Define
+  `BLOOM_FILTER_COUNT_PROBES` before the include to count the words `contains` reads
+  (`bloom_detail::words_read`); `test/test.cc` fails if a miss reads more than 8 on average.
 - **No 128-bit integer outside `__extension__`.** `bloom_detail::reduce` uses one only under
   `__SIZEOF_INT128__` and not `BLOOM_FILTER_NO_INT128`, through a typedef marked `__extension__`, and
   falls back to `bloom_detail::mulhi_portable`. A bare `unsigned __int128` breaks `-Wpedantic -Werror`

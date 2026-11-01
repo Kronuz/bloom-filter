@@ -16,10 +16,12 @@
 //
 // Build via CMake: cmake -B build && cmake --build build && ctest --test-dir build
 //
-// The asserts are the checks, so they stay live in Release builds. CTest also runs this file
-// as bloom_filter_portable with BLOOM_FILTER_NO_INT128, the build without a 128-bit multiply
-// that MSVC and 32-bit targets get.
+// The asserts are the checks, so they stay live in Release builds. BLOOM_FILTER_COUNT_PROBES
+// turns on the header's word counter, which the probe-count test reads. CTest also runs this
+// file as bloom_filter_portable with BLOOM_FILTER_NO_INT128, the build without a 128-bit
+// multiply that MSVC and 32-bit targets get.
 #undef NDEBUG
+#define BLOOM_FILTER_COUNT_PROBES
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -335,6 +337,169 @@ static void test_mulhi() {
 }
 
 
+// ---------------------------------------------------------------------------
+// Frozen copies of FastBloomFilter and BlockedBloomFilter as of c09f715: every probe and
+// every OR-accumulated test, with the reduction done by the oracle above. The grouped early exit
+// and the portable multiply change no bit and no answer, so every answer, false positives
+// included, must match; no input class is allowed to differ.
+// ---------------------------------------------------------------------------
+static uint64_t frozen_mix64(uint64_t x) {
+	x ^= x >> 32;
+	x *= 0xd6e8feb86659fd93ULL;
+	x ^= x >> 32;
+	x *= 0xd6e8feb86659fd93ULL;
+	x ^= x >> 32;
+	return x;
+}
+
+template <size_t N>
+class FrozenFast {
+	static constexpr size_t k = 20;
+	static constexpr size_t m = N * 32;
+	std::vector<uint64_t> words = std::vector<uint64_t>(m / 64);
+public:
+	void add(const char* data, size_t len, uint64_t salt = 1) {
+		uint64_t h = xxh64::hash(data, len);
+		uint64_t d = frozen_mix64(h ^ (salt * 0x9E3779B97F4A7C15ULL)) | 1;
+		for (size_t n = k; n; --n) {
+			h += d;
+			auto bit = ref_mulhi(h, m);
+			words[bit >> 6] |= uint64_t(1) << (bit & 63);
+		}
+	}
+	bool contains(const char* data, size_t len, uint64_t salt = 1) const {
+		uint64_t h = xxh64::hash(data, len);
+		uint64_t d = frozen_mix64(h ^ (salt * 0x9E3779B97F4A7C15ULL)) | 1;
+		uint64_t miss = 0;
+		for (size_t n = k; n; --n) {
+			h += d;
+			auto bit = ref_mulhi(h, m);
+			miss |= ~words[bit >> 6] & (uint64_t(1) << (bit & 63));
+		}
+		return miss == 0;
+	}
+};
+
+template <size_t N>
+class FrozenBlocked {
+	static constexpr size_t k = 20;
+	static constexpr size_t m = N * 32;
+	static constexpr size_t nblocks = m / 512;
+	std::vector<uint64_t> words = std::vector<uint64_t>(m / 64);
+public:
+	void add(const char* data, size_t len, uint64_t salt = 1) {
+		uint64_t h = xxh64::hash(data, len);
+		uint64_t* block = &words[ref_mulhi(h, nblocks) * 8];
+		uint64_t d = frozen_mix64(h ^ (salt * 0x9E3779B97F4A7C15ULL)) | 1;
+		uint64_t x = 0;
+		for (size_t n = k; n; --n) {
+			x += d;
+			auto bit = x >> 55;
+			block[bit >> 6] |= uint64_t(1) << (bit & 63);
+		}
+	}
+	bool contains(const char* data, size_t len, uint64_t salt = 1) const {
+		uint64_t h = xxh64::hash(data, len);
+		const uint64_t* block = &words[ref_mulhi(h, nblocks) * 8];
+		uint64_t d = frozen_mix64(h ^ (salt * 0x9E3779B97F4A7C15ULL)) | 1;
+		uint64_t x = 0;
+		uint64_t miss = 0;
+		for (size_t n = k; n; --n) {
+			x += d;
+			auto bit = x >> 55;
+			miss |= ~block[bit >> 6] & (uint64_t(1) << (bit & 63));
+		}
+		return miss == 0;
+	}
+};
+
+// Fill both filters with the same keys (`inserts` of them, past the design load when
+// inserts > N, so that present, absent and false-positive answers all occur) and compare every
+// answer on the inserted keys and on a larger set of fresh ones.
+template <typename New, typename Frozen>
+static void compare_with_frozen(size_t N, size_t inserts, uint64_t seed) {
+	auto a = std::make_unique<New>();
+	auto b = std::make_unique<Frozen>();
+	uint64_t r = seed;
+	std::vector<std::string> added;
+	for (size_t i = 0; i < inserts; ++i) {
+		added.push_back(random_key(r));
+		uint64_t salt = 1 + (i % 3);
+		a->add(added.back().data(), added.back().size(), salt);
+		b->add(added.back().data(), added.back().size(), salt);
+	}
+	size_t present = 0, positive = 0;
+	for (size_t i = 0; i < added.size(); ++i) {
+		uint64_t salt = 1 + (i % 3);
+		bool x = a->contains(added[i].data(), added[i].size(), salt);
+		assert(x && b->contains(added[i].data(), added[i].size(), salt));
+		present += x;
+	}
+	uint64_t r2 = seed ^ 0x5bd1e995;
+	const size_t probes = 150000;
+	for (size_t i = 0; i < probes; ++i) {
+		auto k = random_key(r2);
+		uint64_t salt = 1 + (i % 4);
+		bool x = a->contains(k.data(), k.size(), salt);
+		assert(x == b->contains(k.data(), k.size(), salt));
+		positive += x;
+	}
+	std::printf("  N=%zu inserts=%zu: %zu present, %zu of %zu fresh keys positive, all equal to the frozen copy\n",
+	            N, inserts, present, positive, probes);
+}
+
+static void test_one_hash_types_frozen() {
+	std::printf("bloom-filter one-hash layouts equal the frozen copies:\n");
+	// Power-of-two and other sizes (m / 64 and m / 512 are not powers of two for 1008), a
+	// single word or block, the design load and three times it.
+	compare_with_frozen<FastBloomFilter<8192>, FrozenFast<8192>>(8192, 8192, 1);
+	compare_with_frozen<FastBloomFilter<8192>, FrozenFast<8192>>(8192, 3 * 8192, 2);
+	compare_with_frozen<FastBloomFilter<1008>, FrozenFast<1008>>(1008, 1008, 3);
+	compare_with_frozen<FastBloomFilter<1008>, FrozenFast<1008>>(1008, 3 * 1008, 4);
+	compare_with_frozen<FastBloomFilter<2>, FrozenFast<2>>(2, 8, 5);
+	compare_with_frozen<BlockedBloomFilter<8192>, FrozenBlocked<8192>>(8192, 8192, 6);
+	compare_with_frozen<BlockedBloomFilter<8192>, FrozenBlocked<8192>>(8192, 3 * 8192, 7);
+	compare_with_frozen<BlockedBloomFilter<1008>, FrozenBlocked<1008>>(1008, 1008, 8);
+	compare_with_frozen<BlockedBloomFilter<1008>, FrozenBlocked<1008>>(1008, 3 * 1008, 9);
+	compare_with_frozen<BlockedBloomFilter<16>, FrozenBlocked<16>>(16, 24, 10);
+}
+
+
+// ---------------------------------------------------------------------------
+// The miss path leaves at the first group with a clear bit. The header counts the words
+// contains() reads when BLOOM_FILTER_COUNT_PROBES is defined.
+// ---------------------------------------------------------------------------
+template <typename F>
+static size_t words_for(const F& f, const std::string& s, uint64_t salt = 1) {
+	size_t before = bloom_detail::words_read;
+	(void)f.contains(s.data(), s.size(), salt);
+	return bloom_detail::words_read - before;
+}
+
+template <typename F>
+static void test_probe_count(const char* name) {
+	constexpr size_t N = 8192;
+	auto f = std::make_unique<F>();
+	// An empty filter: every lookup ends after the first group.
+	for (int i = 0; i < 1000; ++i) assert(words_for(*f, absent_key(i)) == bloom_detail::probe_group);
+
+	for (int i = 0; i < int(N); ++i) add(*f, present_key(i));
+	// A present key has every bit set, so it reads all k = 20 words.
+	for (int i = 0; i < int(N); ++i) assert(words_for(*f, present_key(i)) == 20);
+	// A key that is absent at the design load (about 46% of the bits set) reads about
+	// 4 words; reading every probe would be 20.
+	size_t total = 0;
+	const int probes = 100000;
+	for (int i = 0; i < probes; ++i) {
+		size_t w = words_for(*f, absent_key(i));
+		assert(w >= bloom_detail::probe_group && w <= 20);
+		total += w;
+	}
+	double avg = double(total) / probes;
+	std::printf("bloom-filter %s miss reads %.2f words on average (a hit reads 20)\n", name, avg);
+	assert(avg < 8.0);
+}
+
 int main() {
 	test_no_false_negatives();
 	test_false_positive_rate_loose();
@@ -344,6 +509,9 @@ int main() {
 	test_variant<FastBloomFilter<8192>>(1e-5);
 	test_variant<BlockedBloomFilter<8192>>(5e-3);
 	test_mulhi();
+	test_one_hash_types_frozen();
+	test_probe_count<FastBloomFilter<8192>>("FastBloomFilter");
+	test_probe_count<BlockedBloomFilter<8192>>("BlockedBloomFilter");
 	std::printf("all bloom-filter tests passed\n");
 	return 0;
 }

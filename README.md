@@ -78,20 +78,33 @@ They differ in how a key becomes bit positions:
 - `BloomFilter<N>` runs an xxh64 pass and a byte-at-a-time FNV-1a pass, about
   0.9 ns per key byte on top of the 20 probes.
 - `FastBloomFilter<N>` derives every probe from one xxh64 pass over a flat
-  bitset. Its false-positive rate matches `BloomFilter<N>`.
+  bitset and tests them in groups of four, leaving at the first group that has a
+  clear bit, so a miss reads about 4 words instead of 20. Its false-positive
+  rate matches `BloomFilter<N>`.
 - `BlockedBloomFilter<N>` puts all 20 bits of a key in one 64-byte cache line.
   A lookup costs one cache miss, and the false-positive rate is higher.
 
 Each type sets different bits for the same key. Never load a bitset persisted
 from one type into another.
 
-Apple arm64, ns per miss lookup, best of 7, `N = 131072`; `boost::bloom` gets the
-key pre-hashed with the same xxh64:
+ns per lookup, best of 7, `N = 131072`; `boost::bloom` gets the key pre-hashed
+with the same xxh64. Apple M4 Pro (arm64, Apple clang 17):
 
-| key | `BloomFilter` | `FastBloomFilter` | `BlockedBloomFilter` | `boost::bloom` |
+| | `BloomFilter` | `FastBloomFilter` | `BlockedBloomFilter` | `boost::bloom` |
 |---|---|---|---|---|
-| 16 bytes | 26.7 | 17.4 | 14.7 | 17.0 |
-| 64 bytes | 67.3 | 21.8 | 19.1 | 22.6 |
+| 16 bytes, miss | 27.7 | 8.0 | 8.5 | 18.6 |
+| 16 bytes, hit | 19.0 | 18.2 | 15.3 | 17.0 |
+| 64 bytes, miss | 73.4 | 11.9 | 12.1 | 23.4 |
+| 64 bytes, hit | 60.9 | 22.9 | 20.3 | 21.4 |
+
+Intel i9-9980HK (x86_64, Apple clang 17):
+
+| | `BloomFilter` | `FastBloomFilter` | `BlockedBloomFilter` | `boost::bloom` |
+|---|---|---|---|---|
+| 16 bytes, miss | 36.0 | 20.6 | 18.4 | 23.4 |
+| 16 bytes, hit | 39.0 | 43.9 | 33.8 | 38.1 |
+| 64 bytes, miss | 96.1 | 31.7 | 31.1 | 37.1 |
+| 64 bytes, hit | 96.6 | 62.4 | 48.8 | 60.0 |
 
 False positives over 131072 absent keys: 0 for `BloomFilter` and
 `FastBloomFilter`, 172 (about 1.3e-3) for `BlockedBloomFilter`.
