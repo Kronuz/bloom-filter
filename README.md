@@ -84,35 +84,36 @@ Not for:
 
 ## ⚡ Performance
 
-`bloom_bench` times one `contains` call in ns, the best of 7 passes over `N = 131072` keys of random
-lowercase letters. The columns are this library's three types (`BloomFilter`, `FastBloomFilter`,
-`BlockedBloomFilter`) and a comparator, [`boost::bloom::filter<std::uint64_t, 20>`](https://www.boost.org/doc/libs/release/libs/bloom/)
-from Boost 1.92.0 with the same 32 bits per key, fed the key already hashed with the same
-`xxh64`. The rows are the key length in bytes (16 or 64) and whether the key is in the filter
-(`hit`) or not (`miss`). No filter loses a key (the benchmark counts false negatives); they differ
-in which absent keys they report present, listed below the tables.
+`bloom_bench` times one `contains` call in ns, the best of 7 passes over `N = 131072` keys of
+random lowercase letters. The columns are this library's three types (`BloomFilter`,
+`FastBloomFilter`, `BlockedBloomFilter`) and a comparator, [`boost::bloom::filter<std::uint64_t,
+20>`](https://www.boost.org/doc/libs/release/libs/bloom/) from Boost 1.92.0 with the same 32 bits
+per key, fed the key already hashed with the same `xxh64`. The rows are the key length in bytes
+(16 or 64) and whether the key is in the filter (`hit`) or not (`miss`). No filter loses a key
+(the benchmark counts false negatives: 0 in all runs); they differ in which absent keys they
+report present, listed below the tables. Each cell is the best of two runs.
 
 Apple M4 Pro, macOS 26.7:
 
 | Lookup | `BloomFilter` | `FastBloomFilter` | `BlockedBloomFilter` | `boost::bloom` |
 |---|---:|---:|---:|---:|
-| 16 bytes, miss | 27.8 | 7.6 | 8.4 | 18.7 |
-| 16 bytes, hit | 19.1 | 17.6 | 15.1 | 15.4 |
-| 64 bytes, miss | 72.3 | 12.0 | 12.0 | 23.2 |
-| 64 bytes, hit | 59.8 | 22.6 | 19.8 | 21.8 |
+| 16 bytes, miss | 26.9 | 7.7 | 8.2 | 18.7 |
+| 16 bytes, hit | 18.7 | 17.5 | 14.9 | 15.5 |
+| 64 bytes, miss | 71.8 | 11.6 | 12.2 | 23.1 |
+| 64 bytes, hit | 60.3 | 22.8 | 19.9 | 21.1 |
 
 Intel Core i9-9980HK, macOS 15.8:
 
 | Lookup | `BloomFilter` | `FastBloomFilter` | `BlockedBloomFilter` | `boost::bloom` |
 |---|---:|---:|---:|---:|
-| 16 bytes, miss | 35.6 | 18.2 | 18.2 | 23.0 |
-| 16 bytes, hit | 39.1 | 39.8 | 33.5 | 37.5 |
-| 64 bytes, miss | 89.6 | 31.3 | 26.7 | 39.9 |
-| 64 bytes, hit | 96.3 | 60.2 | 42.7 | 58.2 |
+| 16 bytes, miss | 36.4 | 18.2 | 19.0 | 24.7 |
+| 16 bytes, hit | 39.6 | 40.1 | 32.4 | 37.5 |
+| 64 bytes, miss | 91.0 | 31.5 | 26.9 | 34.6 |
+| 64 bytes, hit | 99.8 | 63.2 | 43.9 | 60.5 |
 
 Both machines use Apple clang 17.0.0 with `-O3 -DNDEBUG` (the bench target's flags). False
-positives over 131072 absent keys: 0 for `BloomFilter` and `FastBloomFilter`, 172 (about 1.3e-3)
-for `BlockedBloomFilter` with 16-byte keys, and 0 or 1 for `boost::bloom`.
+positives over 131072 absent keys with 16-byte keys: 0 for `BloomFilter` and `FastBloomFilter`,
+172 (about 1.3e-3) for `BlockedBloomFilter` and 1 for `boost::bloom`.
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBLOOM_FILTER_BUILD_BENCH=ON
