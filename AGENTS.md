@@ -9,10 +9,11 @@ easy to fall into.
 
 ```
 bloom_filter.hh              BloomFilter<N> (xxh64 + fnv1ah64 double hashing, Xapiand's layout) plus FastBloomFilter<N> and BlockedBloomFilter<N> (one xxh64 pass). Header.
-test/test.cc                 Runnable checks: no false negatives, loose false-positive bound, two sizes, the salt parameter, a frozen-copy differential test of BloomFilter, and the one-hash types.
+test/test.cc                 Runnable checks: no false negatives, loose false-positive bound, two sizes, the salt parameter, a frozen-copy differential test of BloomFilter, the one-hash types, and the portable multiply against a schoolbook oracle. Also built as `bloom_filter_portable` with BLOOM_FILTER_NO_INT128.
+test/pedantic.cc             The header under -Wall -Wextra -Wpedantic -Werror (GCC, Clang); built by the CTest test `bloom_filter_pedantic_build`, run by `bloom_filter_pedantic`.
 bench/bloom_bench.cc         Benchmark of the three types against boost::bloom (target bloom_bench, not built by default).
 examples/usage.cc            Runnable usage example, self-checking under CTest, covering empty filters, N inserts, no false negatives, and false-positive rate.
-CMakeLists.txt               INTERFACE library `bloom_filter` (+ alias bloom_filter::bloom_filter); FetchContent hashes; CTest tests `bloom_filter` and `bloom_filter_usage`.
+CMakeLists.txt               INTERFACE library `bloom_filter` (+ alias bloom_filter::bloom_filter); FetchContent hashes; CTest tests `bloom_filter`, `bloom_filter_portable`, `bloom_filter_pedantic` and `bloom_filter_usage`.
 LICENSE                      MIT, Copyright (c) 2018,2019 Dubalu LLC.
 README.md                    What it is, install, quick start, layouts and benchmark numbers.
 CHANGELOG.md                 Dated changes.
@@ -79,6 +80,10 @@ Xapiand's `log.h`, opts or config.
   `4 * N`-byte object with the size baked into the type. The default `N = 131072`
   is 512 KiB. Heap-allocate large filters; the test does (`std::make_unique`)
   precisely because even a modest `N` overflows the stack.
+- **No 128-bit integer outside `__extension__`.** `bloom_detail::reduce` uses one only under
+  `__SIZEOF_INT128__` and not `BLOOM_FILTER_NO_INT128`, through a typedef marked `__extension__`, and
+  falls back to `bloom_detail::mulhi_portable`. A bare `unsigned __int128` breaks `-Wpedantic -Werror`
+  consumers and MSVC; `bloom_filter_pedantic` and `bloom_filter_portable` guard it.
 
 ## How to extend
 

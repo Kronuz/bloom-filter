@@ -97,9 +97,28 @@ namespace bloom_detail {
 		x ^= x >> 32;
 		return x;
 	}
-	// floor(x * range / 2^64): a range reduction with no division.
+	// The high 64 bits of the 128-bit product a * b, from four 32 x 32 -> 64 multiplies.
+	// Standard C++ only; it is the fallback where there is no 128-bit integer type.
+	inline constexpr uint64_t mulhi_portable(uint64_t a, uint64_t b) noexcept {
+		const uint64_t a_lo = a & 0xffffffffULL, a_hi = a >> 32;
+		const uint64_t b_lo = b & 0xffffffffULL, b_hi = b >> 32;
+		const uint64_t lo_lo = a_lo * b_lo;
+		const uint64_t hi_lo = a_hi * b_lo;
+		const uint64_t lo_hi = a_lo * b_hi;
+		const uint64_t hi_hi = a_hi * b_hi;
+		const uint64_t cross = (lo_lo >> 32) + (hi_lo & 0xffffffffULL) + lo_hi;
+		return hi_hi + (hi_lo >> 32) + (cross >> 32);
+	}
+	// floor(x * range / 2^64): a range reduction with no division. One widening multiply
+	// where the compiler has a 128-bit integer (`__extension__` keeps -Wpedantic quiet),
+	// mulhi_portable elsewhere (MSVC, 32-bit targets); BLOOM_FILTER_NO_INT128 forces the latter.
 	inline uint64_t reduce(uint64_t x, uint64_t range) noexcept {
-		return static_cast<uint64_t>((static_cast<unsigned __int128>(x) * range) >> 64);
+#if defined(__SIZEOF_INT128__) && !defined(BLOOM_FILTER_NO_INT128)
+		__extension__ typedef unsigned __int128 u128;
+		return static_cast<uint64_t>((static_cast<u128>(x) * range) >> 64);
+#else
+		return mulhi_portable(x, range);
+#endif
 	}
 }
 

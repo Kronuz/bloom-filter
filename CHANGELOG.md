@@ -4,6 +4,24 @@ All notable changes to `bloom-filter`. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the library has no
 releases, so entries are dated.
 
+## 2026-10-31
+
+### Fixed
+
+- `bloom_detail::reduce` used `unsigned __int128` unconditionally, which every
+  translation unit including the header compiled. GCC's `-Wpedantic -Werror` rejected
+  it, and so did MSVC and 32-bit targets (the audit finding CA8). The type is used
+  only where `__SIZEOF_INT128__` is defined, through an `__extension__` typedef;
+  elsewhere `bloom_detail::mulhi_portable` computes the same high word from four
+  32-bit multiplies. `BLOOM_FILTER_NO_INT128` selects it on any compiler. Results
+  are identical.
+
+### Added
+
+- Tests: the portable multiply against a schoolbook oracle, the whole suite built with
+  `BLOOM_FILTER_NO_INT128` (`bloom_filter_portable`), and the header under
+  `-Wall -Wextra -Wpedantic -Werror` (`bloom_filter_pedantic`).
+
 ## 2026-10-30
 
 ### Added

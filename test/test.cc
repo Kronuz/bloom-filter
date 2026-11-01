@@ -15,6 +15,11 @@
 // the stack (the default N = 131072 is a 512 KiB object).
 //
 // Build via CMake: cmake -B build && cmake --build build && ctest --test-dir build
+//
+// The asserts are the checks, so they stay live in Release builds. CTest also runs this file
+// as bloom_filter_portable with BLOOM_FILTER_NO_INT128, the build without a 128-bit multiply
+// that MSVC and 32-bit targets get.
+#undef NDEBUG
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -265,6 +270,71 @@ static void test_variant(double max_fp) {
 	for (int i = 0; i < 1000; ++i) assert(!contains(*e, absent_key(i)));
 }
 
+
+// ---------------------------------------------------------------------------
+// The 64 x 64 -> high 64 bit multiply behind the range reduction. The oracle is a schoolbook
+// product over 16-bit limbs: no 128-bit type, no code shared with the header.
+// ---------------------------------------------------------------------------
+static uint64_t ref_mulhi(uint64_t a, uint64_t b) {
+	uint32_t x[4], y[4], r[8] = {};
+	for (int i = 0; i < 4; ++i) {
+		x[i] = uint32_t(a >> (16 * i)) & 0xffff;
+		y[i] = uint32_t(b >> (16 * i)) & 0xffff;
+	}
+	for (int i = 0; i < 4; ++i) {
+		uint64_t carry = 0;
+		for (int j = 0; j < 4; ++j) {
+			uint64_t t = uint64_t(x[i]) * y[j] + r[i + j] + carry;
+			r[i + j] = uint32_t(t & 0xffff);
+			carry = t >> 16;
+		}
+		r[i + 4] = uint32_t(carry);
+	}
+	return uint64_t(r[4]) | uint64_t(r[5]) << 16 | uint64_t(r[6]) << 32 | uint64_t(r[7]) << 48;
+}
+
+static void test_mulhi() {
+	// Known products: (2^63 * 2) >> 64, (2^64 - 1)^2 >> 64, and a power-of-two range is a shift.
+	assert(bloom_detail::mulhi_portable(uint64_t(1) << 63, 2) == 1);
+	assert(bloom_detail::mulhi_portable(~uint64_t(0), ~uint64_t(0)) == ~uint64_t(0) - 1);
+	assert(bloom_detail::mulhi_portable(0x123456789abcdef0ULL, uint64_t(1) << 22) == (0x123456789abcdef0ULL >> 42));
+
+	const uint64_t edge[] = {
+		0, 1, 2, 3, 0xffffULL, 0x10000ULL, 0xffffffffULL, 0x100000000ULL, 0x100000001ULL,
+		0xffffffff00000000ULL, 0xffff0000ffff0000ULL, 0x00000000ffff0000ULL,
+		0x7fffffffffffffffULL, 0x8000000000000000ULL, 0x8000000000000001ULL,
+		0xfffffffffffffffeULL, 0xffffffffffffffffULL,
+		uint64_t(1) << 22, (uint64_t(1) << 22) - 1, uint64_t(32000), uint64_t(63),
+	};
+	size_t checked = 0;
+	for (uint64_t a : edge) {
+		for (uint64_t b : edge) {
+			uint64_t want = ref_mulhi(a, b);
+			assert(bloom_detail::mulhi_portable(a, b) == want);
+			assert(bloom_detail::reduce(a, b) == want);  // whichever path this build compiles
+			++checked;
+		}
+	}
+	uint64_t r = 7;
+	for (int i = 0; i < 300000; ++i) {
+		r = r * 6364136223846793005ULL + 1442695040888963407ULL;
+		uint64_t a = r;
+		r = r * 6364136223846793005ULL + 1442695040888963407ULL;
+		uint64_t b = (i % 3 == 0) ? r : (r >> (r & 63));  // full-width and short ranges
+		uint64_t want = ref_mulhi(a, b);
+		assert(bloom_detail::mulhi_portable(a, b) == want);
+		assert(bloom_detail::reduce(a, b) == want);
+#ifdef __SIZEOF_INT128__
+		__extension__ typedef unsigned __int128 u128;
+		assert(want == uint64_t((u128(a) * b) >> 64));  // the oracle against the hardware product
+#endif
+		if (b) assert(bloom_detail::reduce(a, b) < b);
+		++checked;
+	}
+	std::printf("bloom-filter mulhi OK: %zu products against the schoolbook oracle\n", checked);
+}
+
+
 int main() {
 	test_no_false_negatives();
 	test_false_positive_rate_loose();
@@ -273,6 +343,7 @@ int main() {
 	test_default_layout_frozen();
 	test_variant<FastBloomFilter<8192>>(1e-5);
 	test_variant<BlockedBloomFilter<8192>>(5e-3);
+	test_mulhi();
 	std::printf("all bloom-filter tests passed\n");
 	return 0;
 }

@@ -115,6 +115,15 @@ second hash, byte-at-a-time FNV-1a, is a dependent multiply chain of about
   is a higher false-positive rate at the same size, the usual blocked-filter
   trade. It suits filters larger than the cache.
 
+`bloom_detail::reduce` is the high half of a 64 x 64 bit product. It is one
+multiply where the compiler has a 128-bit integer type (`__SIZEOF_INT128__`),
+declared under `__extension__` so `-Wpedantic` stays quiet, and
+`bloom_detail::mulhi_portable`, four 32 x 32 bit multiplies in standard C++,
+everywhere else (MSVC, 32-bit targets). Defining `BLOOM_FILTER_NO_INT128` selects
+the portable one on any compiler, which is how CTest runs the whole suite on it.
+The two give the same value for every input, so the bits do not depend on the
+build.
+
 The three types set different bits for the same key, so a bitset persisted from
 one type must not be loaded into another. The salt rules match `BloomFilter<N>`:
 non-zero (asserted), and the same for `add` and `contains`.

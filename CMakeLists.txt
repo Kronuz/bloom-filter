@@ -39,6 +39,26 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_link_libraries(bloom_filter_test PRIVATE bloom_filter)
   add_test(NAME bloom_filter COMMAND bloom_filter_test)
 
+  # The same checks with the 128-bit multiply compiled out, so the portable fallback that
+  # MSVC and 32-bit targets use runs on every platform and not only where it is the default.
+  add_executable(bloom_filter_portable_test test/test.cc)
+  target_link_libraries(bloom_filter_portable_test PRIVATE bloom_filter)
+  target_compile_definitions(bloom_filter_portable_test PRIVATE BLOOM_FILTER_NO_INT128)
+  add_test(NAME bloom_filter_portable COMMAND bloom_filter_portable_test)
+
+  # The header builds under -Wall -Wextra -Wpedantic -Werror (GCC and Clang). The target is
+  # left out of the default build and built by a test, so a diagnostic fails that test.
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_executable(bloom_filter_pedantic_test EXCLUDE_FROM_ALL test/pedantic.cc)
+    target_link_libraries(bloom_filter_pedantic_test PRIVATE bloom_filter)
+    target_compile_options(bloom_filter_pedantic_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    add_test(NAME bloom_filter_pedantic_build
+             COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --config $<CONFIG> --target bloom_filter_pedantic_test)
+    add_test(NAME bloom_filter_pedantic COMMAND bloom_filter_pedantic_test)
+    set_tests_properties(bloom_filter_pedantic_build PROPERTIES FIXTURES_SETUP bloom_filter_pedantic_exe)
+    set_tests_properties(bloom_filter_pedantic PROPERTIES FIXTURES_REQUIRED bloom_filter_pedantic_exe)
+  endif()
+
   # A runnable usage example that self-checks the core Bloom filter contract. It
   # is also registered with ctest so example drift catches regressions.
   add_executable(bloom_filter_usage examples/usage.cc)
