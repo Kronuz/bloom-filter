@@ -84,23 +84,24 @@ Not for:
 
 ## ⚡ Performance
 
-ns per lookup, best of 7, `N = 131072`, built by the bench target at `-O3`;
-`boost::bloom` (Boost 1.89 or newer) gets the key pre-hashed with the same xxh64.
+ns per lookup, best of 7, `N = 131072` keys. The comparator is `boost::bloom::filter<std::uint64_t, 20>`
+from Boost 1.92.0, given the key pre-hashed with the same xxh64.
 
 | machine, lookup | `BloomFilter` | `FastBloomFilter` | `BlockedBloomFilter` | `boost::bloom` |
 |---|---|---|---|---|
-| M4 Pro, 16 bytes, miss | 27.7 | 8.0 | 8.5 | 18.6 |
-| M4 Pro, 16 bytes, hit | 19.0 | 18.2 | 15.3 | 17.0 |
-| M4 Pro, 64 bytes, miss | 73.4 | 11.9 | 12.1 | 23.4 |
-| M4 Pro, 64 bytes, hit | 60.9 | 22.9 | 20.3 | 21.4 |
-| i9-9980HK, 16 bytes, miss | 36.0 | 20.6 | 18.4 | 23.4 |
-| i9-9980HK, 16 bytes, hit | 39.0 | 43.9 | 33.8 | 38.1 |
-| i9-9980HK, 64 bytes, miss | 96.1 | 31.7 | 31.1 | 37.1 |
-| i9-9980HK, 64 bytes, hit | 96.6 | 62.4 | 48.8 | 60.0 |
+| M4 Pro, 16 bytes, miss | 27.8 | 7.6 | 8.4 | 18.7 |
+| M4 Pro, 16 bytes, hit | 19.1 | 17.6 | 15.1 | 15.4 |
+| M4 Pro, 64 bytes, miss | 72.3 | 12.0 | 12.0 | 23.2 |
+| M4 Pro, 64 bytes, hit | 59.8 | 22.6 | 19.8 | 21.8 |
+| i9-9980HK, 16 bytes, miss | 35.6 | 18.2 | 18.2 | 23.0 |
+| i9-9980HK, 16 bytes, hit | 39.1 | 39.8 | 33.5 | 37.5 |
+| i9-9980HK, 64 bytes, miss | 89.6 | 31.3 | 26.7 | 39.9 |
+| i9-9980HK, 64 bytes, hit | 96.3 | 60.2 | 42.7 | 58.2 |
 
-Machines: Apple M4 Pro (arm64) and Intel Core i9-9980HK (x86_64), Apple clang 17. False
-positives over 131072 absent keys: 0 for `BloomFilter` and `FastBloomFilter`, 172 (about
-1.3e-3) for `BlockedBloomFilter`.
+Machines: Apple M4 Pro (arm64) and Intel Core i9-9980HK (x86_64), both on macOS with Apple clang
+17, `-O3 -DNDEBUG` (the bench target's flags). False positives over 131072 absent keys: 0 for
+`BloomFilter` and `FastBloomFilter`, 172 (about 1.3e-3) for `BlockedBloomFilter` with 16-byte
+keys, and 0 or 1 for `boost::bloom`.
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBLOOM_FILTER_BUILD_BENCH=ON
