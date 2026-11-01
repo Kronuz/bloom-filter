@@ -11,7 +11,7 @@ easy to fall into.
 bloom_filter.hh              BloomFilter<N> (xxh64 + fnv1ah64 double hashing, Xapiand's layout) plus FastBloomFilter<N> and BlockedBloomFilter<N> (one xxh64 pass). Header.
 test/test.cc                 Runnable checks: no false negatives, loose false-positive bound, two sizes, the salt parameter, frozen-copy differential tests of all three types, the portable multiply against a schoolbook oracle, and the words a miss reads. Also built as `bloom_filter_portable` with BLOOM_FILTER_NO_INT128.
 test/pedantic.cc             The header under -Wall -Wextra -Wpedantic -Werror (GCC, Clang); built by the CTest test `bloom_filter_pedantic_build`, run by `bloom_filter_pedantic`.
-bench/bloom_bench.cc         Benchmark of the three types against boost::bloom (target bloom_bench, not built by default).
+bench/bloom_bench.cc         Benchmark of the three types against boost::bloom (target bloom_bench, BLOOM_FILTER_BUILD_BENCH=ON; boost::bloom is optional).
 examples/usage.cc            Runnable usage example, self-checking under CTest, covering empty filters, N inserts, no false negatives, and false-positive rate.
 CMakeLists.txt               INTERFACE library `bloom_filter` (+ alias bloom_filter::bloom_filter); FetchContent hashes; CTest tests `bloom_filter`, `bloom_filter_portable`, `bloom_filter_pedantic` and `bloom_filter_usage`.
 LICENSE                      MIT, Copyright (c) 2018,2019 Dubalu LLC.

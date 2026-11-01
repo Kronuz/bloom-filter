@@ -4,6 +4,13 @@ All notable changes to `bloom-filter`. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the library has no
 releases, so entries are dated.
 
+## 2026-11-01
+
+### Changed
+
+- `bloom_bench` builds only with `-DBLOOM_FILTER_BUILD_BENCH=ON` (it was a target left out
+  of the default build and built by name). `boost::bloom` is found by that target alone.
+
 ## 2026-10-31
 
 ### Changed

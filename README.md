@@ -110,7 +110,8 @@ False positives over 131072 absent keys: 0 for `BloomFilter` and
 `FastBloomFilter`, 172 (about 1.3e-3) for `BlockedBloomFilter`.
 
 ```sh
-cmake -B build && cmake --build build --target bloom_bench && ./build/bloom_bench
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBLOOM_FILTER_BUILD_BENCH=ON
+cmake --build build --target bloom_bench && ./build/bloom_bench
 ```
 
 ## 📚 Documentation

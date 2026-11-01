@@ -65,14 +65,19 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   target_link_libraries(bloom_filter_usage PRIVATE bloom_filter)
   add_test(NAME bloom_filter_usage COMMAND bloom_filter_usage)
 
-  # Benchmark (not built by default): cmake --build build --target bloom_bench
-  # Comparator boost::bloom (Boost >= 1.89) is used only here, never by the library.
-  add_executable(bloom_bench EXCLUDE_FROM_ALL bench/bloom_bench.cc)
-  target_link_libraries(bloom_bench PRIVATE bloom_filter)
-  target_compile_options(bloom_bench PRIVATE -O3 -DNDEBUG)
-  find_path(BOOST_BLOOM_INCLUDE boost/bloom/filter.hpp HINTS /opt/homebrew/include /usr/local/include)
-  if(BOOST_BLOOM_INCLUDE)
-    target_include_directories(bloom_bench PRIVATE ${BOOST_BLOOM_INCLUDE})
-    target_compile_definitions(bloom_bench PRIVATE HAVE_BOOST_BLOOM)
+  # Benchmark (off by default):
+  #   cmake -B build -DBLOOM_FILTER_BUILD_BENCH=ON && cmake --build build --target bloom_bench
+  # The comparator boost::bloom (Boost >= 1.89) is found only here, never by the library; the
+  # benchmark builds without it.
+  option(BLOOM_FILTER_BUILD_BENCH "Build bench/bloom_bench.cc" OFF)
+  if(BLOOM_FILTER_BUILD_BENCH)
+    add_executable(bloom_bench bench/bloom_bench.cc)
+    target_link_libraries(bloom_bench PRIVATE bloom_filter)
+    target_compile_options(bloom_bench PRIVATE -O3 -DNDEBUG)
+    find_path(BOOST_BLOOM_INCLUDE boost/bloom/filter.hpp HINTS /opt/homebrew/include /usr/local/include)
+    if(BOOST_BLOOM_INCLUDE)
+      target_include_directories(bloom_bench PRIVATE ${BOOST_BLOOM_INCLUDE})
+      target_compile_definitions(bloom_bench PRIVATE HAVE_BOOST_BLOOM)
+    endif()
   endif()
 endif()
