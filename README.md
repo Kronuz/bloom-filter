@@ -7,132 +7,132 @@ Part of [Kronuz C++ Libraries](https://github.com/Kronuz/cpp-libraries), a colle
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)
 ![Header-only](https://img.shields.io/badge/header--only-yes-green.svg)
 
-A fixed-size Bloom filter for C++20: answer "have I seen this key?" with no false
-negatives and about one false positive in a million, in memory that does not
-grow with the data. For skipping expensive lookups when the answer is no.
-
-![bloom-filter: a key hashes to bit positions; any clear bit means absent, all set means probably present](docs/bloom-filter.svg)
+Header-only Bloom filter for C++20: fixed size, no false negatives, one false positive in a
+million at design load. A key sets 20 bits in an array of `N × 32` bits; any clear bit
+means the key is absent, and all set means it is probably present. Reach for it to skip a
+disk read, a network call or a big-table lookup when the answer is no.
 
 ## ✨ Highlights
 
-- **No false negatives.** A key that was added always reads back present.
-- **About 1e-6 false positives** at the design load: `N × 32` bits and 20 probes.
-- **Fixed footprint.** `BloomFilter<N>` is a `4 × N`-byte object; the default
+- **No false negatives:** a key that was added always reads back present.
+- **Sized for one in a million:** `N × 32` bits and 20 probes target a false-positive
+  rate of 1e-6 at `N` keys.
+- **Fixed footprint:** `BloomFilter<N>` is a `4 × N`-byte object; the default
   `N = 131072` is 512 KiB.
-- **Salted views.** A non-zero salt gives an independent filter over the same
-  bits.
-- **Three layouts, one API.** `FastBloomFilter<N>` and `BlockedBloomFilter<N>`
-  hash each key once, so lookup cost does not grow with key length.
-- **One header**, hashing with [hashes](https://github.com/Kronuz/hashes)'
-  `xxh64` and `fnv1ah64`.
-
-## 📦 Installation
-
-Requires a C++20 compiler and CMake 3.14 or newer; it fetches hashes. CI builds it
-on Linux (x86_64, arm64), macOS (arm64, x86_64), and FreeBSD, plus ASan, UBSan,
-and TSan builds.
-
-```cmake
-include(FetchContent)
-FetchContent_Declare(bloom_filter
-  GIT_REPOSITORY https://github.com/Kronuz/bloom-filter.git
-  GIT_TAG        main)
-FetchContent_MakeAvailable(bloom_filter)
-
-target_link_libraries(my_app PRIVATE bloom_filter::bloom_filter)
-```
+- **Salted views:** a non-zero salt gives an independent filter over the same bits.
+- **Three layouts, one API:** `BloomFilter<N>` hashes with xxh64 and a byte-at-a-time
+  FNV-1a; `FastBloomFilter<N>` derives every probe from one xxh64 pass and leaves at the
+  first group of four probes with a clear bit; `BlockedBloomFilter<N>` keeps a key's 20
+  bits in one 64-byte cache line.
+- **Hashing from [hashes](https://github.com/Kronuz/hashes)** (`xxh64`, `fnv1ah64`).
 
 ## 🚀 Quick start
 
 ```cpp
 #include "bloom_filter.hh"
 
+#include <cstdio>
 #include <memory>
 #include <string>
 
 int main() {
-	auto seen = std::make_unique<BloomFilter<8192>>();   // 32 KiB; large ones belong on the heap
+	auto seen = std::make_unique<BloomFilter<8192>>();  // 32 KiB; large filters belong on the heap
 
 	std::string key = "user-42";
 	seen->add(key.data(), key.size());
-	bool hit = seen->contains(key.data(), key.size());   // true, always
-	bool miss = seen->contains("other", 5);              // false, almost always
+	std::printf("%d\n", seen->contains(key.data(), key.size()));  // 1, always
+	std::printf("%d\n", seen->contains("other", 5));              // 0, almost always
 }
 ```
 
 [`examples/usage.cc`](examples/usage.cc) is a runnable usage example.
 
+## 📦 Installation
+
+Requires C++20 and CMake 3.14 or newer. CMake fetches
+[hashes](https://github.com/Kronuz/hashes) and its dependencies, all header-only. CI
+builds and tests it on Linux (x86_64 with GCC and Clang, arm64), macOS (arm64, x86_64)
+and FreeBSD, plus ASan, UBSan and TSan builds.
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(bloom_filter
+  GIT_REPOSITORY https://github.com/Kronuz/bloom-filter.git
+  GIT_TAG        0c7af62f1c080382a9772845573b97893400fe75)  # or main, to track the tip
+FetchContent_MakeAvailable(bloom_filter)
+
+target_link_libraries(my_app PRIVATE bloom_filter::bloom_filter)
+```
+
+Link `bloom_filter::bloom_filter` and include `bloom_filter.hh`.
+
 ## 🎯 When to use it
 
-- ✅ A cheap "definitely not there" in front of a disk read, a network call, or a
-  big table.
-- ❌ Removing keys: a Bloom filter cannot delete without causing false negatives.
-- ❌ A static key set built once: [fusefilter](https://github.com/Kronuz/fusefilter)
-  answers the same question in fewer bits per key.
+- A cheap "definitely not there" in front of a disk read, a network call or a big table.
+- `FastBloomFilter` for long keys or mostly-absent lookups; `BlockedBloomFilter` when one
+  cache miss per lookup matters more than the false-positive rate.
 
-## ⚡ Layouts and performance
+Not for:
 
-The three types share the API, the size (`N × 32` bits), and `k = 20` probes.
-They differ in how a key becomes bit positions:
+- Removing keys: a Bloom filter cannot delete without causing false negatives.
+- A static key set built once: [fusefilter](https://github.com/Kronuz/fusefilter) answers
+  the same question in fewer bits per key.
+- Moving a persisted bitset between layouts: each type sets different bits for the same
+  key.
+- A false-positive rate near 1e-6 with `BlockedBloomFilter`: it measures about 1.3e-3 at
+  `N` keys.
 
-- `BloomFilter<N>` runs an xxh64 pass and a byte-at-a-time FNV-1a pass, about
-  0.9 ns per key byte on top of the 20 probes.
-- `FastBloomFilter<N>` derives every probe from one xxh64 pass over a flat
-  bitset and tests them in groups of four, leaving at the first group that has a
-  clear bit, so a miss reads about 4 words instead of 20. Its false-positive
-  rate matches `BloomFilter<N>`.
-- `BlockedBloomFilter<N>` puts all 20 bits of a key in one 64-byte cache line.
-  A lookup costs one cache miss, and the false-positive rate is higher.
+## ⚡ Performance
 
-Each type sets different bits for the same key. Never load a bitset persisted
-from one type into another.
+ns per lookup, best of 7, `N = 131072`, built by the bench target at `-O3`;
+`boost::bloom` (Boost 1.89 or newer) gets the key pre-hashed with the same xxh64.
 
-ns per lookup, best of 7, `N = 131072`; `boost::bloom` gets the key pre-hashed
-with the same xxh64. Apple M4 Pro (arm64, Apple clang 17):
-
-| | `BloomFilter` | `FastBloomFilter` | `BlockedBloomFilter` | `boost::bloom` |
+| machine, lookup | `BloomFilter` | `FastBloomFilter` | `BlockedBloomFilter` | `boost::bloom` |
 |---|---|---|---|---|
-| 16 bytes, miss | 27.7 | 8.0 | 8.5 | 18.6 |
-| 16 bytes, hit | 19.0 | 18.2 | 15.3 | 17.0 |
-| 64 bytes, miss | 73.4 | 11.9 | 12.1 | 23.4 |
-| 64 bytes, hit | 60.9 | 22.9 | 20.3 | 21.4 |
+| M4 Pro, 16 bytes, miss | 27.7 | 8.0 | 8.5 | 18.6 |
+| M4 Pro, 16 bytes, hit | 19.0 | 18.2 | 15.3 | 17.0 |
+| M4 Pro, 64 bytes, miss | 73.4 | 11.9 | 12.1 | 23.4 |
+| M4 Pro, 64 bytes, hit | 60.9 | 22.9 | 20.3 | 21.4 |
+| i9-9980HK, 16 bytes, miss | 36.0 | 20.6 | 18.4 | 23.4 |
+| i9-9980HK, 16 bytes, hit | 39.0 | 43.9 | 33.8 | 38.1 |
+| i9-9980HK, 64 bytes, miss | 96.1 | 31.7 | 31.1 | 37.1 |
+| i9-9980HK, 64 bytes, hit | 96.6 | 62.4 | 48.8 | 60.0 |
 
-Intel i9-9980HK (x86_64, Apple clang 17):
-
-| | `BloomFilter` | `FastBloomFilter` | `BlockedBloomFilter` | `boost::bloom` |
-|---|---|---|---|---|
-| 16 bytes, miss | 36.0 | 20.6 | 18.4 | 23.4 |
-| 16 bytes, hit | 39.0 | 43.9 | 33.8 | 38.1 |
-| 64 bytes, miss | 96.1 | 31.7 | 31.1 | 37.1 |
-| 64 bytes, hit | 96.6 | 62.4 | 48.8 | 60.0 |
-
-False positives over 131072 absent keys: 0 for `BloomFilter` and
-`FastBloomFilter`, 172 (about 1.3e-3) for `BlockedBloomFilter`.
+Machines: Apple M4 Pro (arm64) and Intel Core i9-9980HK (x86_64), Apple clang 17. False
+positives over 131072 absent keys: 0 for `BloomFilter` and `FastBloomFilter`, 172 (about
+1.3e-3) for `BlockedBloomFilter`.
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBLOOM_FILTER_BUILD_BENCH=ON
-cmake --build build --target bloom_bench && ./build/bloom_bench
+cmake --build build --target bloom_bench
+./build/bloom_bench
 ```
 
 ## 📚 Documentation
 
-- [docs/API.md](docs/API.md): `add`, `contains`, sizing, and salts.
+- [docs/API.md](docs/API.md): `add`, `contains`, sizing and salts.
 - [ARCHITECTURE.md](ARCHITECTURE.md): how the probe positions are derived.
+- [CHANGELOG.md](CHANGELOG.md): notable changes, with their measurements.
 - [AGENTS.md](AGENTS.md): repository map and invariants.
-- [CHANGELOG.md](CHANGELOG.md): what changed.
+- [Catalog entry](https://github.com/Kronuz/cpp-libraries/blob/main/AGENTS.md#bloom-filter)
+  in Kronuz C++ Libraries.
 
 ## 🛠️ Building and testing
 
 ```sh
-cmake -B build && cmake --build build && ctest --test-dir build
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
+
+Add `-DBLOOM_FILTER_BUILD_BENCH=ON` to build the benchmark.
 
 ## 🤝 Contributing
 
-Issues and pull requests are welcome. Read [AGENTS.md](AGENTS.md) first. CI must
-pass on every platform.
+Issues and pull requests are welcome; read [AGENTS.md](AGENTS.md) and the catalog's
+[rules of engagement](https://github.com/Kronuz/cpp-libraries/blob/main/AGENTS.md#rules-of-engagement)
+first.
 
 ## 📄 License
 
-MIT, Copyright (c) 2018, 2019 Dubalu LLC. See [LICENSE](LICENSE). Extracted from
-[Xapiand](https://github.com/Kronuz/Xapiand).
+MIT, see [LICENSE](LICENSE). Extracted from [Xapiand](https://github.com/Kronuz/Xapiand).

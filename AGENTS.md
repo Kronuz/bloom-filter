@@ -18,7 +18,6 @@ LICENSE                      MIT, Copyright (c) 2018,2019 Dubalu LLC.
 README.md                    What it is, install, quick start, layouts and benchmark numbers.
 CHANGELOG.md                 Dated changes.
 docs/API.md                  The API reference and usage.
-docs/bloom-filter.d2         The README diagram's source (docs/bloom-filter.svg is rendered from it).
 ARCHITECTURE.md              Internal design: the m/k sizing, double hashing, the salt, where the guarantees come from, the one-hash layouts.
 ```
 
