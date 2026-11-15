@@ -123,6 +123,8 @@ cmake --build build --target bloom_bench
 
 ## 📚 Documentation
 
+- [The Bag of Holding](https://kronuz.github.io/blog/bag-of-holding/):
+  the Familiars post that covers `bloom-filter` among the small helpers.
 - [docs/API.md](docs/API.md): `add`, `contains`, sizing and salts.
 - [ARCHITECTURE.md](ARCHITECTURE.md): how the probe positions are derived.
 - [CHANGELOG.md](CHANGELOG.md): notable changes, with their measurements.
